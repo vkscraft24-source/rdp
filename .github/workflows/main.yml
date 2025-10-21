@@ -1,37 +1,56 @@
-      - name: Create or Update RDP User with fixed password (vishal7186)
+      - name: Create RDP User with fixed password (from Secret)
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
-          $password = "vishal7186"
+          # Use password from repo secret (recommended)
+          $password = $env:RDP_PASSWORD
+          if (-not $password) {
+              Write-Error "RDP password not provided in RDP_PASSWORD secret"
+              exit 1
+          }
 
-          # If user exists, update password via net user (reliable)
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
+          # If user exists, remove it first (optional)
           if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-              Write-Host "User 'RDP' exists — updating password..."
-              # Update local user password (plain-text) — runs as admin in runner
-              net user RDP $password
-          } else {
-              Write-Host "Creating new user 'RDP'..."
-              $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+              Try {
+                  Remove-LocalUser -Name "RDP" -ErrorAction Stop
+              } Catch {
+                  Write-Warning "Could not remove existing RDP user: $_"
+              }
           }
 
-          # Ensure group membership
-          Try {
-              Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction Stop
-          } Catch {
-              Write-Warning "Could not add to Administrators: $_"
-          }
-          Try {
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction Stop
-          } Catch {
-              Write-Warning "Could not add to Remote Desktop Users: $_"
-          }
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
-          # Export creds for later steps (optional)
+          # Export creds to environment for later steps (masked in logs if secret)
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
 
-          # Verify
-          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              Write-Error "User creation/update failed"
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
               exit 1
-          } else {
-              Write-Host "RDP user ready."
+          }
+      - name: Create RDP User with fixed hardcoded password (NOT RECOMMENDED)
+        run: |
+          $password = "vishal7186"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+
+          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+              Try {
+                  Remove-LocalUser -Name "RDP" -ErrorAction Stop
+              } Catch {
+                  Write-Warning "Could not remove existing RDP user: $_"
+              }
+          }
+
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+
+          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
           }
